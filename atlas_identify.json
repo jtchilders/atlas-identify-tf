@@ -1,0 +1,33 @@
+{
+   "data_handling": {
+      "input_file_glob":               "/blues/gpfs/group/3/ATLAS/users/jchilder/data/100GEV_0ETA_OPHI_bcs/normalized_data/*",
+      "evt_per_file":                  1,
+      "image_shape":                   [15, 50, 1153],
+      "training_to_validation_ratio":  0.9,
+      "shuffle":                       true,
+      "classes":                       ["bjet"]
+   },
+   "model_pars": {
+      "model_checkpoint_file":         "weights/{date}.{{epoch:02d}}-{{val_loss:.2f}}.hdf5"
+   },
+   "training": {
+      "batch_size":                    5,
+      "learning_rate":                 0.0001,
+      "beta_1":                        0.9,
+      "beta_2":                        0.999,
+      "epsilon":                       null,
+      "decay":                         0.0001,
+      "epochs":                        3,
+      "verbose":                       1,
+      "steps_per_valid":               100,
+      "lrsched":                       [1e-4,5e-4,5e-4,1e-4,1e-4,5e-5,5e-5,1e-5,1e-5,1e-5,1e-5,5e-6,5e-6,5e-6,5e-6,5e-6]
+   },
+   "tensorboard": {
+      "log_dir":                       "./logs",
+      "histogram_freq":                1,
+      "write_graph":                   true,
+      "write_images":                  true,
+      "write_grads":                   true,
+      "embeddings_freq":               0
+   }
+}
