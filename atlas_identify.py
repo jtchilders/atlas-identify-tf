@@ -21,8 +21,12 @@ def main():
                        help='use my custom optimizer',action='store_true')
    parser.add_argument('--ml_comm', default=False,
                        help='use Cray PE ML Plugin',action='store_true')
+   parser.add_argument('--batches_per_epoch','-b', default=-1, type=int,
+                       help='limit the number of batches for training. default is all')
    parser.add_argument('--num_files','-n', default=-1, type=int,
                        help='limit the number of files to process. default is all')
+   parser.add_argument('--ds_procs', default=1, type=int,
+                       help='number of dataset files to read concurrently. Can cause memory explosion.')
    parser.add_argument('--num_intra', type=int,default=4,
                        help='num_intra')
    parser.add_argument('--num_inter', type=int,default=1,
@@ -41,34 +45,29 @@ def main():
                        help='use adam optimizer')
    parser.add_argument('--sgd',action='store_true',default=False,
                        help='use SGD optimizer')
-   parser.add_argument('--lrsched',action='store_true',default=False,
-                       help='use learning rate scheduler')
    parser.add_argument('--timeline_filename',default='timeline_profile.json',
                        help='filename to use for timeline json data')
-   parser.add_argument('--sparse', action='store_true',
-                       help="Indicate that the input data is in sparse format")
    parser.add_argument('--random-seed', type=int,default=0,dest='random_seed',
                        help="Set the random number seed. This needs to be the same for all ranks to ensure the batch generator serves data properly.")
 
+   parser.add_argument('--dstest',action='store_true',default=False,
+                       help='use dummy dataset')
 
-   parser.add_argument('--resnet',action='store_true',default=False,
-                       help='use resnet model')
-   parser.add_argument('--multi_cnn',action='store_true',default=False,
-                       help='use multi_cnn model')
 
    args = parser.parse_args()
 
    print('loading MPI bits')
-   log_level = logging.DEBUG
+   log_level = logging.INFO
    rank = 0
    nranks = 1
    if args.horovod:
-      import horovod.keras as hvd
+      import horovod.tensorflow as hvd
       hvd.init()
       rank = hvd.rank()
       nranks = hvd.size()
       if rank > 0:
          log_level = logging.ERROR
+      tf.logging.set_verbosity(log_level)
       logging.basicConfig(level=log_level,format='%(asctime)s %(levelname)s:' + '{:05d}'.format(rank) + ':%(name)s:%(process)s:%(thread)s:%(message)s')
       logger.info('horovod from: %s',hvd.__file__)
       logger.info("Rank: %s of %s",rank,nranks)
@@ -88,8 +87,9 @@ def main():
    logger.info('myopt:                 %s',args.myopt)
    logger.info('adam:                  %s',args.adam)
    logger.info('sgd:                   %s',args.sgd)
-   logger.info('lrsched:               %s',args.lrsched)
    logger.info('num_files:             %s',args.num_files)
+   logger.info('batches_per_epoch:     %s',args.batches_per_epoch)
+   logger.info('ds_procs:              %s',args.ds_procs)
    logger.info('num_intra:             %s',args.num_intra)
    logger.info('kmp_blocktime:         %s',args.kmp_blocktime)
    logger.info('kmp_affinity:          %s',args.kmp_affinity)
@@ -98,11 +98,8 @@ def main():
    logger.info('timeline:              %s',args.timeline)
    logger.info('timeline_filename:     %s',args.timeline_filename)
    logger.info('random-seed:           %s',args.random_seed)
-   logger.info('sparse:                %s',args.sparse)
+   logger.info('dstest:                %s',args.dstest)
 
-
-   logger.info('resnet:                %s',args.resnet)
-   logger.info('multi_cnn:             %s',args.multi_cnn)
    np.random.seed(args.random_seed)
 
    # load configuration
@@ -111,46 +108,84 @@ def main():
    num_epochs = config_file['training']['epochs']
    config_file['rank'] = rank
    config_file['nranks'] = nranks
-   config_file['sparse'] = args.sparse
    config_file['random_seed'] = args.random_seed
 
    # convert glob to filelists for training and validation
 
    trainlist,validlist = get_filelist(config_file,args)
 
-   # create datasets from the filelists
-   ds_train = dh.get_dataset(trainlist,batch_size)
-   ds_valid = dh.get_dataset(validlist,batch_size)
+   batches_per_epoch = int(float(len(trainlist)) / float(config_file['data_handling']['evt_per_file']))
+   if args.batches_per_epoch != -1:
+      batches_per_epoch = args.batches_per_epoch
 
+   batches_per_epoch = int(batches_per_epoch / nranks)
+
+   logger.info('creating datasets')
+   # create datasets from the filelists
+   if args.dstest:
+      ds_train = dh.get_dummy_dataset(trainlist,batch_size,args.ds_procs,repeat=100,config_file=config_file)
+      ds_valid = dh.get_dummy_dataset(validlist,batch_size,args.ds_procs,repeat=100,config_file=config_file)
+   else:
+      ds_train = dh.get_dataset(trainlist,batch_size,args.ds_procs)
+      ds_valid = dh.get_dataset(validlist,batch_size,args.ds_procs)
+
+   if args.horovod:
+      logger.info('create shards')
+      ds_train = ds_train.shard(nranks,rank)
+      ds_valid = ds_valid.shard(nranks,rank)
+
+   logger.info('creating iterators')
    # get iterators for the datasets
    handle,next_batch,iter_train,iter_valid = dh.get_iterators(ds_train,ds_valid,config_file)
 
    # the next_batch represents the (image,truth)
    input_image,truth = next_batch
 
-   # create the session for running
-   config_proto = create_config_proto(args)
-   sess = tf.Session(config=config_proto)
-
-   # create the handles for each dataset for running
-   handle_train = sess.run(iter_train.string_handle())
-   handle_valid = sess.run(iter_valid.string_handle())
-
    # get the model to run
+   logger.info('creating model')
    prediction = get_model(input_image,args)
 
    # create a loss function and apply to truth/prediction
+   logger.info('creating lossop')
    lossop = tf.losses.mean_squared_error(truth,prediction)
    tf.summary.scalar("loss", lossop)
 
    # create an optimizer and minimize loss
+   logger.info('creating optimizer')
    opt = tf.train.GradientDescentOptimizer(config_file['training']['learning_rate'])
+
+   # create a global step count
+   global_step = tf.train.get_or_create_global_step()
+
+   # if using horovod
+   hooks = []
+   if args.horovod:
+      logger.info('adding horovod optimizer')
+      opt = hvd.DistributedOptimizer(opt)
+
+      # Horovod: BroadcastGlobalVariablesHook broadcasts initial variable states
+      # from rank 0 to all other processes. This is necessary to ensure consistent
+      # initialization of all workers when training is started with random weights
+      # or restored from a checkpoint.
+      hooks.append(hvd.broadcast_global_variables(0))
+
+   logger.info('add compute gradient opt')
    # Compute the gradients for a list of variables.
    grads_and_vars = opt.compute_gradients(lossop, tf.trainable_variables())
    # Ask the optimizer to apply the capped gradients.
-   train = opt.apply_gradients(grads_and_vars)
+   train = opt.apply_gradients(grads_and_vars,global_step=global_step)
+
+   # need an accuracy
+   truth = tf.Print(truth,[rank,truth],'truth = ',-1,1000)
+   prediction = tf.Print(prediction,[rank,prediction],'prediction = ',-1,1000)
+   accuracy = tf.reduce_sum(tf.cast(tf.equal(tf.round(prediction),tf.cast(truth,tf.float32)),tf.float32),name='accuracy')
+   tf.summary.scalar('accuracy',accuracy)
+
+   # print the trainable parameters for reference
+   print_trainable_pars()
 
    # Create summaries to visualize weights
+   logger.info('adding trainable pars to histograms')
    for var in tf.trainable_variables():
       tf.summary.histogram(var.name.replace(':','_'), var)
    # Summarize all gradients
@@ -158,13 +193,71 @@ def main():
       if grad is not None:
          tf.summary.histogram(var.name.replace(':','_') + '/gradient', grad)
 
+   # op to merge all the summaries for recording (must run in session)
+   logger.info('merging summary data opt')
+   merged_summary_op = tf.summary.merge_all()
+
+   # op to write logs to Tensorboard
+   logger.info('create summary writer')
+   if rank == 0:
+      summary_writer = tf.summary.FileWriter(args.tb_logdir, graph=tf.get_default_graph())
+
+
+   # Session begins here.
+
+   # create the session for running
+   logger.info('start session')
+   config_proto = create_config_proto(args)
+   sess = tf.Session(config=config_proto)
+
+   # create the handles for each dataset for running
+   logger.info('create iterator handles')
+   handle_train = sess.run(iter_train.string_handle())
+   # handle_valid = sess.run(iter_valid.string_handle())
 
    # initialize all the variables
+   logger.info('init globals')
    init = tf.global_variables_initializer()
    sess.run(init)
 
-   merged_summary_op = tf.summary.merge_all()
+   logger.info('run hooks')
+   for hook in hooks:
+      logger.info('running hook: "%s" ',hook)
+      sess.run(hook)
 
+   sum_duration = 0.
+   sum2_duration = 0.
+   n = 0.
+   for epoch_num in range(num_epochs):
+
+      logger.info('   >>>>>>>>> epoch %s <<<<<<<<<',epoch_num)
+
+      batch_num = 0
+      while True:
+         try:
+            start = time.time()
+            logger.info('batch: %10d of %10d',batch_num,batches_per_epoch)
+
+            _,loss_val,summary,acc_val = sess.run([train,lossop,merged_summary_op,accuracy],feed_dict = { handle: handle_train })
+         
+            # Write logs at every iteration
+            if rank == 0:
+               summary_writer.add_summary(summary, epoch_num*batches_per_epoch + batch_num)
+            batch_num += 1
+
+            duration = time.time() - start
+            sum_duration += duration
+            sum2_duration += duration*duration
+            n += 1.
+            time_to_completion = (batches_per_epoch - batch_num) * (sum_duration / n)
+            logger.info(' loss = %10.4f; acurracy = %10.5f; duration = %10.5f; completed in = %10.5f',loss_val,accuracy_val,time.time() - start,(time_to_completion)/60.)
+
+         except tf.errors.OutOfRangeError:
+            logger.info('   <<<<<<<<< epoch %s >>>>>>>>>',epoch_num)
+            break
+
+
+def print_trainable_pars():
    total_parameters = 0
    for variable in tf.trainable_variables():
        # shape is an array of tf.Dimension
@@ -174,20 +267,6 @@ def main():
            variable_parameters *= dim.value
        total_parameters += variable_parameters
    logger.info('total trainable parameters: %s',total_parameters)
-
-   # op to write logs to Tensorboard
-   summary_writer = tf.summary.FileWriter(args.tb_logdir, graph=tf.get_default_graph())
-
-   for epoch_num in range(num_epochs):
-      start = time.time()
-
-      logger.info('epoch: %s',epoch_num)
-      _,loss_val,summary = sess.run([train,lossop,merged_summary_op],feed_dict = { handle: handle_train })
-      logger.info(' loss = %10.4f  calculated in %10d',loss_val,time.time() - start)
-      # Write logs at every iteration
-      summary_writer.add_summary(summary, epoch_num)
-
-
 
 
 def get_model(input_image,args):
@@ -222,6 +301,8 @@ def get_filelist(config_file,args):
       train_file_index -= 1
       train_imgs = filelist[:train_file_index]
       valid_imgs = filelist[train_file_index:nfiles]
+
+   logger.info('training files: %s; validation files: %s',len(train_imgs),len(valid_imgs))
 
    return train_imgs,valid_imgs
 

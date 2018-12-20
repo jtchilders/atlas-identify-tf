@@ -10,21 +10,80 @@ layer_counter = 0
 def build_model(input_image):
 
    logger.info('layer %s: %s',layer_counter,input_image)
+   output = input_image
 
-   output = Conv3D(32)(input_image)
+   output = Conv3D(32)(output)
    add_summary(output)
-
    output = LeakyRelu(output)
    add_summary(output)
 
-
-   output = Conv3D(64)(input_image)
+   output = MaxPooling3D((1,1,2))(output)
    add_summary(output)
 
+   output = Conv3D(32)(output)
+   add_summary(output)
    output = LeakyRelu(output)
+   add_summary(output)
+
+   output = MaxPooling3D((1,1,2))(output)
+   add_summary(output)
+
+
+   output = Conv3D(64)(output)
+   add_summary(output)
+   output = LeakyRelu(output)
+   add_summary(output)
+
+   output = MaxPooling3D((1,1,2))(output)
+   add_summary(output)
+
+   output = Conv3D(64)(output)
+   add_summary(output)
+   output = LeakyRelu(output)
+   add_summary(output)
+
+   output = MaxPooling3D((1,1,2))(output)
+   add_summary(output)
+
+   output = Conv3D(128)(output)
+   add_summary(output)
+   output = LeakyRelu(output)
+   add_summary(output)
+
+   output = MaxPooling3D((1,2,2))(output)
+   add_summary(output)
+
+   output = Conv3D(128)(output)
+   add_summary(output)
+   output = LeakyRelu(output)
+   add_summary(output)
+
+   output = MaxPooling3D((1,2,2))(output)
+   add_summary(output)
+
+   output = Conv3D(256)(output)
+   add_summary(output)
+   output = LeakyRelu(output)
+   add_summary(output)
+
+   output = MaxPooling3D((2,2,2))(output)
+   add_summary(output)
+
+   output = Conv3D(256)(output)
+   add_summary(output)
+   output = LeakyRelu(output)
+   add_summary(output)
+
+   output = MaxPooling3D((1,2,2))(output)
    add_summary(output)
 
    output = Flatten()(output)
+   add_summary(output)
+
+
+   output = Dense(128)(output)
+   add_summary(output)
+   output = LeakyRelu(output)
    add_summary(output)
 
    output = Dense(1)(output)
@@ -77,6 +136,23 @@ def Conv3D(filters,
          kernel_constraint=kernel_constraint,
          bias_constraint=bias_constraint,
          trainable=trainable,
+         name=name.format(layer_counter))
+
+
+def MaxPooling3D(pool_size,
+         strides=None,
+         padding='same',
+         data_format='channels_last',
+         name='MaxPooling3D_{0:02d}'):
+   global layer_counter
+   layer_counter += 1
+   if strides is None:
+      strides = pool_size
+   return tf.layers.MaxPooling3D(
+         pool_size=pool_size,
+         strides=strides,
+         padding=padding,
+         data_format=data_format,
          name=name.format(layer_counter))
 
 
