@@ -55,31 +55,44 @@ def main():
       'cs': cdata['mean'] - sdata['mean'],
    }
 
+   layer_det = {0:'pix',1:'pix',2:'pix',3:'pix',
+                4:'sct',5:'sct',6:'sct',7:'sct',
+                8:'lar',9:'lar',10:'lar',11:'lar',
+                12:'til',13:'til',14:'til',15:'til',
+   }
+
    for diff in diffdata:
 
       d = diffdata[diff]
       vmin = np.min(d)
       vmax = np.max(d)
-      #norm = colors.Normalize(vmin=vmin, vmax=vmax)
-      norm = colors.Normalize(vmin=-0.001,vmax=0.001)
+      norms = {
+         'pix': colors.Normalize(vmin=-0.001,vmax=0.001),
+         'sct': colors.Normalize(vmin=vmin,vmax=vmax),
+         'lar': colors.Normalize(vmin=-0.001,vmax=0.001),
+         'til': colors.Normalize(vmin=vmin,vmax=vmax),
+      }
       plt.figure(1,figsize=(12,16))
-      plots = []
-      ax = []
+      plots = {'pix':[],'sct':[],'lar':[],'til':[]}
+      axes = {'pix':[],'sct':[],'lar':[],'til':[]}
       for layer in range(num_layers):
-      
+         
          plt.subplot(num_layers,1,num_layers-layer)
          plt.gca().text(-0.1,0.5,'%s' % layer,fontsize=14,horizontalalignment='center',verticalalignment='center',transform=plt.gca().transAxes)
          p = plt.imshow(d[layer],aspect='auto')
-         p.set_norm(norm)
+
+         axes[layer_det[layer]].append(plt.gca())
+         p.set_norm(norms[layer_det[layer]])
+         plots[layer_det[layer]].append(p)
          p.callbacksSM.connect('changed',update)
-         plots.append(p)
-         ax.append(plt.gca())
          plt.gca().label_outer()
          # plt.ylim(1,1e5)
 
 
-      plt.gcf().colorbar(plots[0], ax=ax, orientation='vertical', fraction=.1,aspect=30)
-      plt.gcf().text(0.01,0.95,'layer',fontsize=15)
+      for det in plots:
+         plt.gcf().colorbar(plots[det][0], ax=axes[det], orientation='vertical', fraction=.1,aspect=30)
+      
+      axes['til'][-1].text(-0.15,1.0,'layer',fontsize=15,transform=axes['til'][-1].transAxes)
 
       plt.gcf().savefig('quarkflavor_%s_fullimg.png' % diff)
       plt.close('all')
