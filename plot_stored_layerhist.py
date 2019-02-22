@@ -51,6 +51,7 @@ def main():
 
    plt.figure(1,figsize=(16,12))
 
+   plots = []
    for layer in range(num_layers):
       
       plt.subplot(num_layers,1,num_layers-layer)
@@ -61,16 +62,18 @@ def main():
          sigma = data[qflav]['sigma'][layer]
 
          layer_data_y = mean
+         logger.info('layer data %s %s %s',layer,qflav,layer_data_y)
          layer_data_x = [-0.095 + i*0.01 for i in range(layer_histo_bins)]
          layer_error_x = [0.005]*layer_histo_bins
          layer_error_y = sigma
          
-         plt.errorbar(layer_data_x,layer_data_y,xerr=layer_error_x,yerr=layer_error_y,
-                      markerfacecolor=color[qflav],marker=marker[qflav],alpha=0.6)
-      
-      plt.ylim(1,1e5)
+         p = plt.errorbar(layer_data_x,layer_data_y,xerr=layer_error_x,yerr=layer_error_y,
+                      markerfacecolor=color[qflav],marker=marker[qflav],alpha=0.4,label=qflav)
+         plots.append(p)
+      plt.ylim(1e-4,1e5)
       plt.yscale('log')
 
+   plt.legend(loc='upper center')
    plt.gcf().savefig('quarkflavor_layerhist.png')
    plt.close('all')
 

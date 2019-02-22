@@ -160,7 +160,7 @@ def main():
             layer_histo = image[layer].flatten()
             n, bins, patches = plt.hist(layer_histo,bins=layer_histo_bins,range=(-0.1,1.0),alpha=0.5,label='%s' % layer)
             layer_histos.append(n)
-            plt.ylim(1,1e5)
+            plt.ylim(0.1,1e5)
             plt.yscale('log')
             logger.debug('layer %s max %s',layer,np.max(layer_histo))
          profile_data[label]['layerhist'] += np.array(layer_histos)
