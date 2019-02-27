@@ -37,8 +37,8 @@ def get_iterators(ds_train,ds_valid,config_file):
    # could use the `output_types` and `output_shapes` properties of either
    # `training_dataset` or `validation_dataset` here, because they have
    # identical structure.
-   feature_shape = (config_file['training']['batch_size'],) + tuple(config_file['data_handling']['image_shape']) + (1,)
-   label_shape = (config_file['training']['batch_size'],len(config_file['data_handling']['classes']))
+   feature_shape = (config_file['training']['batch_size'],) + tuple(config_file['data_handling']['image_shape'])
+   label_shape = (config_file['training']['batch_size'],8,180,1,7)
 
    handle = tf.placeholder(tf.string, shape=[])
    iterator = tf.data.Iterator.from_string_handle(
@@ -61,11 +61,37 @@ def get_data_from_filename(filename):
    # logger.debug('reading filename %s' % filename)
    # start = time.time()
    npdata = np.load(filename)
-   features = npdata['raw']
-   features = np.float32(features[:,:,:,:,np.newaxis])
-   labels = npdata['truth']
-   labels = labels[:,0,8]  # exctract b-jet only
-   labels = np.int32(labels[:,np.newaxis])
+   features = npdata['raw']  # (N, 16, 256, 5761)
+   file_entries,channels,height,width = features.shape
+
+   grid_w = 180
+   grid_h = 8
+   
+   # reduce to just 2 channels, sum of EM and sum of HAD
+   new_features = np.zeros([file_entries,2,height,int(width/2)*2])
+   # sum all EM layers
+   new_features[:,0,:,:] = np.sum(features[:,8:12,:,:-1],axis=1)
+   # sum all HAD layers
+   new_features[:,1,:,:] = np.sum(features[:,12:16,:,:-1],axis=1)
+
+   features = new_features
+   logger.info('features = %s',features.shape)
+   truth = npdata['truth']
+   labels = np.zeros([file_entries,grid_h,grid_w,1,7])
+
+   for i in range(file_entries):
+      for j in range(truth.shape[1]):
+            gw = truth[i,j,1]/(width/grid_w)
+            gh = truth[i,j,2]/(height/grid_h)
+            logger.info('i = %s,j = %s, gh = %s,gw = %s',i,j,gh,gw)
+            labels[i,gh,gw,0,0:5] = truth[i,j,0:5]
+            labels[i,gh,gw,0,5] = np.any(truth[i,j,5:10])
+            labels[i,gh,gw,0,6] = np.any(truth[i,j,10:14])
+
+   logger.info('truth = %s',labels)
+   #labels = labels[:,:,]
+   #labels = labels[:,0,8]  # exctract b-jet only
+   #labels = np.int32(labels[:,np.newaxis])
    # logger.debug('read filename %s in %10.2f' % (filename,time.time() - start))
    # logger.debug('shapes: features = %s; labels = %s',features.shape,labels.shape)
    return features,labels

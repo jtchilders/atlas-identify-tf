@@ -1,7 +1,9 @@
 import os,argparse,logging,json,glob,time
 import numpy as np
 import tensorflow as tf
-import data_handling as dh
+import data_handling_calo2d as dh
+import model_yolo_calo2d as model
+import loss_yolo as loss
 logger = logging.getLogger(__name__)
 
 
@@ -143,12 +145,17 @@ def main():
 
    # get the model to run
    logger.info('creating model')
-   prediction = get_model(input_image,args)
+   prediction,grid_h,grid_w = model.build_model(input_image,1,len(config_file['data_handling']['classes']),config_file['training']['batch_size'])
 
    # create a loss function and apply to truth/prediction
    logger.info('creating lossop')
-   lossop = tf.losses.mean_squared_error(truth,prediction)
+   lossop = loss.loss(truth,prediction)
    tf.summary.scalar("loss", lossop)
+
+   p1 = tf.print('rank:',rank,'truth:',truth)
+   p2 = tf.print('rank:',rank,'prediction:',prediction)
+   with tf.control_dependencies([p1,p2]):
+      lossop = tf.identity(lossop)
 
    # create an optimizer and minimize loss
    logger.info('creating optimizer')
@@ -176,8 +183,7 @@ def main():
    train = opt.apply_gradients(grads_and_vars,global_step=global_step)
 
    # need an accuracy
-   truth = tf.Print(truth,[rank,truth],'truth = ',-1,1000)
-   prediction = tf.Print(prediction,[rank,prediction],'prediction = ',-1,1000)
+   
    accuracy = tf.reduce_sum(tf.cast(tf.equal(tf.round(prediction),tf.cast(truth,tf.float32)),tf.float32),name='accuracy')
    tf.summary.scalar('accuracy',accuracy)
 
@@ -267,13 +273,6 @@ def print_trainable_pars():
            variable_parameters *= dim.value
        total_parameters += variable_parameters
    logger.info('total trainable parameters: %s',total_parameters)
-
-
-def get_model(input_image,args):
-
-   import simple_cnn_model as model
-
-   return model.build_model(input_image)
 
 
 def get_filelist(config_file,args):
