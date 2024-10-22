@@ -1,7 +1,7 @@
-import os,argparse,logging,json,glob,time
+import os,argparse,logging,json,glob,time,sys
 import numpy as np
 import tensorflow as tf
-import data_handling_calo2d as dh
+import data_handling_calo2d_h5 as dh
 import model_yolo_calo2d as model
 import loss_yolo as loss
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def main():
       rank = hvd.rank()
       nranks = hvd.size()
       if rank > 0:
-         log_level = logging.ERROR
+         log_level = logging.WARNING
       tf.logging.set_verbosity(log_level)
       logging.basicConfig(level=log_level,format='%(asctime)s %(levelname)s:' + '{:05d}'.format(rank) + ':%(name)s:%(process)s:%(thread)s:%(message)s')
       logger.info('horovod from: %s',hvd.__file__)
@@ -93,6 +93,7 @@ def main():
    logger.info('batches_per_epoch:     %s',args.batches_per_epoch)
    logger.info('ds_procs:              %s',args.ds_procs)
    logger.info('num_intra:             %s',args.num_intra)
+   logger.info('num_inter:             %s',args.num_inter)
    logger.info('kmp_blocktime:         %s',args.kmp_blocktime)
    logger.info('kmp_affinity:          %s',args.kmp_affinity)
    logger.info('batch_queue_size:      %s',args.batch_queue_size)
@@ -116,11 +117,18 @@ def main():
 
    trainlist,validlist = get_filelist(config_file,args)
 
-   batches_per_epoch = int(float(len(trainlist)) / float(config_file['data_handling']['evt_per_file']))
-   if args.batches_per_epoch != -1:
-      batches_per_epoch = args.batches_per_epoch
+   train_total_images = len(trainlist) * config_file['data_handling']['evt_per_file']
+   train_total_batches = int(train_total_images / batch_size)
 
-   batches_per_epoch = int(batches_per_epoch / nranks)
+   if args.batches_per_epoch != -1:
+      train_total_batches = args.batches_per_epoch
+
+   # get the model to run
+   logger.info('creating model')
+   prediction,grid_h,grid_w = model.build_model(input_image,1,len(config_file['data_handling']['classes']),config_file['training']['batch_size'])
+
+   config_file['data_handling']['grid_h'] = grid_h
+   config_file['data_handling']['grid_w'] = grid_w
 
    logger.info('creating datasets')
    # create datasets from the filelists
@@ -128,8 +136,8 @@ def main():
       ds_train = dh.get_dummy_dataset(trainlist,batch_size,args.ds_procs,repeat=100,config_file=config_file)
       ds_valid = dh.get_dummy_dataset(validlist,batch_size,args.ds_procs,repeat=100,config_file=config_file)
    else:
-      ds_train = dh.get_dataset(trainlist,batch_size,args.ds_procs)
-      ds_valid = dh.get_dataset(validlist,batch_size,args.ds_procs)
+      ds_train = dh.get_dataset(trainlist,batch_size,config_file,args.ds_procs)
+      ds_valid = dh.get_dataset(validlist,batch_size,config_file,args.ds_procs)
 
    if args.horovod:
       logger.info('create shards')
@@ -143,19 +151,17 @@ def main():
    # the next_batch represents the (image,truth)
    input_image,truth = next_batch
 
-   # get the model to run
-   logger.info('creating model')
-   prediction,grid_h,grid_w = model.build_model(input_image,1,len(config_file['data_handling']['classes']),config_file['training']['batch_size'])
+
 
    # create a loss function and apply to truth/prediction
-   logger.info('creating lossop')
+   '''logger.info('creating lossop')
    lossop = loss.loss(truth,prediction)
    tf.summary.scalar("loss", lossop)
 
-   p1 = tf.print('rank:',rank,'truth:',truth)
-   p2 = tf.print('rank:',rank,'prediction:',prediction)
-   with tf.control_dependencies([p1,p2]):
-      lossop = tf.identity(lossop)
+   #p1 = tf.print('rank:',rank,'truth:',truth)
+   #p2 = tf.print('rank:',rank,'prediction:',prediction)
+   #with tf.control_dependencies([p1,p2]):
+   #   lossop = tf.identity(lossop)
 
    # create an optimizer and minimize loss
    logger.info('creating optimizer')
@@ -187,8 +193,7 @@ def main():
    accuracy = tf.reduce_sum(tf.cast(tf.equal(tf.round(prediction),tf.cast(truth,tf.float32)),tf.float32),name='accuracy')
    tf.summary.scalar('accuracy',accuracy)
 
-   # print the trainable parameters for reference
-   print_trainable_pars()
+   
 
    # Create summaries to visualize weights
    logger.info('adding trainable pars to histograms')
@@ -207,7 +212,7 @@ def main():
    logger.info('create summary writer')
    if rank == 0:
       summary_writer = tf.summary.FileWriter(args.tb_logdir, graph=tf.get_default_graph())
-
+   '''
 
    # Session begins here.
 
@@ -225,11 +230,14 @@ def main():
    logger.info('init globals')
    init = tf.global_variables_initializer()
    sess.run(init)
+   
+   # print the trainable parameters for reference
+   print_trainable_pars()
 
-   logger.info('run hooks')
+   '''logger.info('run hooks')
    for hook in hooks:
-      logger.info('running hook: "%s" ',hook)
-      sess.run(hook)
+      # logger.info('running hook: "%s" ',hook)
+      sess.run(hook)'''
 
    sum_duration = 0.
    sum2_duration = 0.
@@ -244,11 +252,14 @@ def main():
             start = time.time()
             logger.info('batch: %10d of %10d',batch_num,batches_per_epoch)
 
-            _,loss_val,summary,acc_val = sess.run([train,lossop,merged_summary_op,accuracy],feed_dict = { handle: handle_train })
+            # _,loss_val,summary,acc_val = sess.run([train,lossop,merged_summary_op,accuracy],feed_dict = { handle: handle_train })
+            sess.run([prediction],feed_dict={handle:handle_train})
+            loss_val = 0.
+            accuracy = 0.
          
             # Write logs at every iteration
-            if rank == 0:
-               summary_writer.add_summary(summary, epoch_num*batches_per_epoch + batch_num)
+            # if rank == 0:
+            #    summary_writer.add_summary(summary, epoch_num*batches_per_epoch + batch_num)
             batch_num += 1
 
             duration = time.time() - start
@@ -256,7 +267,7 @@ def main():
             sum2_duration += duration*duration
             n += 1.
             time_to_completion = (batches_per_epoch - batch_num) * (sum_duration / n)
-            logger.info(' loss = %10.4f; acurracy = %10.5f; duration = %10.5f; completed in = %10.5f',loss_val,accuracy_val,time.time() - start,(time_to_completion)/60.)
+            # logger.info(' loss = %10.4f; acurracy = %10.5f; duration = %10.5f; completed in = %10.5f',loss_val,accuracy_val,time.time() - start,(time_to_completion)/60.)
 
          except tf.errors.OutOfRangeError:
             logger.info('   <<<<<<<<< epoch %s >>>>>>>>>',epoch_num)

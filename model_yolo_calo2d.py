@@ -12,11 +12,149 @@ def build_model(input_image,num_boxes,num_labels,batch_size):
    outputs = input_image
 
    # Layer 1
+   outputs = Conv2D(32,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+   outputs = MaxPooling2D((2,2))(outputs)
+   
+   # Layer 2
+   outputs = Conv2D(64,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+   outputs = MaxPooling2D((2,2))(outputs)
+
+
+   # Layer 3
+   outputs = Conv2D(128,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 4
+   outputs = Conv2D(64,(1,1))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 5
+   outputs = Conv2D(128,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 6
+   outputs = Conv2D(256,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 7
+   outputs = Conv2D(128,(1,1))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+
+
+   # Layer 8
+   outputs = Conv2D(256,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+   outputs = MaxPooling2D((2,2))(outputs)
+
+
+
+   # Layer 9
+   outputs = Conv2D(512,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 10
+   outputs = Conv2D(256,(1,1))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 11
+   outputs = Conv2D(512,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 12
+   outputs = Conv2D(256,(1,1))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+
+
+   # Layer 13
+   outputs = Conv2D(512,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+   outputs = MaxPooling2D((2,2))(outputs)
+
+
+
+   connection = outputs
+
+
+
+   # Layer 14
+   outputs = Conv2D(1024,(3,3))(outputs)
+   outputs = BatchNorm()(outputs)
+   outputs = LeakyReLU(outputs)
+
+   # Layer 15
+   # outputs = Conv2D(512,(1,1))(outputs)
+   # outputs = BatchNorm()(outputs)
+   # outputs = LeakyReLU(outputs)
+
+   # # Layer 16
+   # outputs = Conv2D(1024,(3,3))(outputs)
+   # outputs = BatchNorm()(outputs)
+   # outputs = LeakyReLU(outputs)
+
+   # # Layer 17
+   # outputs = Conv2D(512,(1,1))(outputs)
+   # outputs = BatchNorm()(outputs)
+   # outputs = LeakyReLU(outputs)
+
+   # # Layer 18
+   # outputs = Conv2D(1024,(3,3))(outputs)
+   # outputs = BatchNorm()(outputs)
+   # outputs = LeakyReLU(outputs)
+
+   # # Layer 19
+   # outputs = Conv2D(1024,(3,3))(outputs)
+   # outputs = BatchNorm()(outputs)
+   # outputs = LeakyReLU(outputs)
+
+   # # Layer 20
+   # outputs = Conv2D(1024,(3,3))(outputs)
+   # outputs = BatchNorm()(outputs)
+   # outputs = LeakyReLU(outputs)
+
+
+
+   # # Layer 21
+   # connection = Conv2D(64,(1,1))(connection)
+   # add_summary(connection)
+   # connection = BatchNorm()(connection)
+   # connection = LeakyReLU(connection)
+
+
+   # outputs = tf.concat([connection,outputs],axis=1)
+
+
+
+   return outputs,8,180
+   
+
+def build_model2(input_image,num_boxes,num_labels,batch_size):
+   logger.info('building model, input image: %s',input_image)
+   outputs = input_image
+
+
+   # Layer 1
    outputs = FullLayer(outputs,32,(3,3),(2,2))
 
    # Layer 2
    outputs = FullLayer(outputs,64,(3,3),(2,2))
-   
+
    # Layer 3
    outputs = PartialLayer(outputs,128,(3,3))
    
@@ -38,6 +176,8 @@ def build_model(input_image,num_boxes,num_labels,batch_size):
    # Layer 9
    outputs = PartialLayer(outputs,512,(3,3))
 
+   return outputs,0,0
+
    # Layer 10
    outputs = PartialLayer(outputs,256,(1,1))
 
@@ -50,9 +190,11 @@ def build_model(input_image,num_boxes,num_labels,batch_size):
    # Layer 13
    outputs = PartialLayer(outputs,512,(3,3))
 
+   outputs = MaxPooling2D((2,2))(outputs)
+
+
    connection = outputs
 
-   outputs = MaxPooling2D((2,2))(outputs)
 
    # Layer 14
    outputs = PartialLayer(outputs,1024,(3,3))
@@ -80,15 +222,15 @@ def build_model(input_image,num_boxes,num_labels,batch_size):
    add_summary(connection)
    connection = BatchNorm()(connection)
    connection = LeakyReLU(connection)
-   total_pixels = connection.get_shape()[1].value*connection.get_shape()[2].value*connection.get_shape()[3].value
+   #total_pixels = connection.get_shape()[1].value*connection.get_shape()[2].value*connection.get_shape()[3].value
 
-   new_axis2 = outputs.get_shape()[2].value
-   new_axis3 = outputs.get_shape()[3].value
-   new_axis1 = int(total_pixels/new_axis2/new_axis3)
-   connection = tf.reshape(connection,
-         shape=(batch_size,new_axis1,new_axis2,new_axis3),
-         name='Reshape_%s'%layer_counter)
-   # connection = tf.space_to_depth(connection,block_size=2,data_format='NCHW')
+   #new_axis2 = outputs.get_shape()[2].value
+   #new_axis3 = outputs.get_shape()[3].value
+   #new_axis1 = int(total_pixels/new_axis2/new_axis3)
+   #connection = tf.reshape(connection,
+   #      shape=(batch_size,new_axis1,new_axis2,new_axis3),
+   #      name='Reshape_%s'%layer_counter)
+   #connection = tf.space_to_depth(connection,block_size=2,data_format='NCHW')
 
    logger.info('outputs = %s; connection = %s',outputs,connection)
 
@@ -121,32 +263,39 @@ def build_model(input_image,num_boxes,num_labels,batch_size):
    return outputs,grid_h,grid_w
 
 
-def add_summary(output):
+def add_summary(output,debug=True):
    tf.summary.histogram(output.name.replace(':','_'),output)
    logger.info('layer %s: %s',layer_counter,output)
    sys.stdout.flush()
    sys.stderr.flush()
 
+   if debug:
+      pr = tf.print('layer ',layer_counter)
+      with tf.control_dependencies([pr]):
+         output = tf.identity(output)
 
-def FullLayer(inputs,filters,kernel_size=(3,3),pool_size=(2,2)):
+   return output
+
+
+def FullLayer(inputs,filters,kernel_size=(3,3),pool_size=(2,2),debug=True):
 
    outputs = Conv2D(filters,kernel_size)(inputs)
-   add_summary(outputs)
+   outputs = add_summary(outputs,debug)
    outputs = BatchNorm()(outputs)
    outputs = LeakyReLU(outputs)
    outputs = MaxPooling2D(pool_size)(outputs)
-   add_summary(outputs)
+   outputs = add_summary(outputs,debug)
 
    return outputs
 
 
-def PartialLayer(inputs,filters,kernel_size=(3,3)):
+def PartialLayer(inputs,filters,kernel_size=(3,3),debug=True):
 
    outputs = Conv2D(filters,kernel_size)(inputs)
-   add_summary(outputs)
+   outputs = add_summary(outputs,debug)
    outputs = BatchNorm()(outputs)
    outputs = LeakyReLU(outputs)
-   add_summary(outputs)
+   outputs = add_summary(outputs,debug)
 
    return outputs
 
@@ -168,7 +317,7 @@ def BatchNorm(axis=-1,
       renorm=False,
       renorm_clipping=None,
       renorm_momentum=0.99,
-      fused=None,
+      fused=True,
       trainable=True,
       virtual_batch_size=None,
       adjustment=None,

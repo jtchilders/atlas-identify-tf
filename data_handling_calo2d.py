@@ -68,7 +68,7 @@ def get_data_from_filename(filename):
    grid_h = 8
    
    # reduce to just 2 channels, sum of EM and sum of HAD
-   new_features = np.zeros([file_entries,2,height,int(width/2)*2])
+   new_features = np.zeros([file_entries,2,height,int(width/2)*2],dtype=np.float32)
    # sum all EM layers
    new_features[:,0,:,:] = np.sum(features[:,8:12,:,:-1],axis=1)
    # sum all HAD layers
@@ -77,18 +77,17 @@ def get_data_from_filename(filename):
    features = new_features
    logger.info('features = %s',features.shape)
    truth = npdata['truth']
-   labels = np.zeros([file_entries,grid_h,grid_w,1,7])
+   labels = np.zeros([file_entries,grid_h,grid_w,1,7],dtype=np.int32)
 
    for i in range(file_entries):
       for j in range(truth.shape[1]):
-            gw = truth[i,j,1]/(width/grid_w)
-            gh = truth[i,j,2]/(height/grid_h)
-            logger.info('i = %s,j = %s, gh = %s,gw = %s',i,j,gh,gw)
+            gw = int(truth[i,j,1]/(width/grid_w))
+            gh = int(truth[i,j,2]/(height/grid_h))
             labels[i,gh,gw,0,0:5] = truth[i,j,0:5]
             labels[i,gh,gw,0,5] = np.any(truth[i,j,5:10])
             labels[i,gh,gw,0,6] = np.any(truth[i,j,10:14])
 
-   logger.info('truth = %s',labels)
+   logger.info('truth = %s',labels.shape)
    #labels = labels[:,:,]
    #labels = labels[:,0,8]  # exctract b-jet only
    #labels = np.int32(labels[:,np.newaxis])
@@ -100,8 +99,65 @@ def get_data_from_filename(filename):
 # wrapper function to make this a representative function that Tensorflow
 # can add to a graph
 def get_data_wrapper(filename):
-   features, labels = tf.py_func(get_data_from_filename, [filename], (tf.float32, tf.int32))
+   features, labels = tf.py_func(func=get_data_from_filename,inp=[filename], Tout=(tf.float32, tf.int32))
    # return tf.data.Dataset.from_tensor_slices((features, labels))
    return (features,labels)
+
+
+if __name__ == '__main__':
+   from mpi4py import MPI
+   logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s:' + '{:05d}'.format(MPI.COMM_WORLD.Get_rank()) + ':%(name)s:%(process)s:%(thread)s:%(message)s')
+   import argparse,json,glob
+   parser = argparse.ArgumentParser(description='testing dataset prep')
+   parser.add_argument('--config_file', '-c',
+                       help='configuration in standard json format.')
+   parser.add_argument('--nimgs', '-n',
+                       help='number of images to print.',default=10,type=int)
+   args = parser.parse_args()
+
+   config_file = json.load(open(args.config_file))
+   batch_size = config_file['training']['batch_size']
+
+   filelist = sorted(glob.glob(config_file['data_handling']['input_file_glob']))
+   logger.info('found %s input files',len(filelist))
+
+   half_i = int(len(filelist)/2)
+   trainlist = filelist[:half_i]
+   validlist = filelist[half_i:]
+
+   ds_train = get_dataset(trainlist,batch_size,10)
+   ds_valid = get_dataset(validlist,batch_size,1)
+
+   handle,next_batch,iter_train,iter_valid = get_iterators(ds_train,ds_valid,config_file)
+
+   config = tf.ConfigProto()
+   config.intra_op_parallelism_threads = 64
+   config.inter_op_parallelism_threads = 10
+   config.allow_soft_placement         = True
+   sess = tf.Session(config=config)
+
+   handle_train = sess.run(iter_train.string_handle())
+
+   for i in range(args.nimgs):
+      logger.info('image: %s of %s',i,args.nimgs)
+      features,labels = sess.run(next_batch,feed_dict={handle:handle_train})
+      logger.info('shapes:  features =  %s; labels = %s',features.shape,labels.shape)
+      mask = tf.greater(features,0.1)
+      non_zero_features = tf.boolean_mask(features,mask)
+      p1 = tf.print('non_zero_features:',non_zero_features,summarize=100)
+      sess.run(p1)
+
+      zero = tf.constant(0, dtype=tf.int32)
+      where = tf.not_equal(labels[...,0], zero)
+      indices = tf.where(where)
+
+      #non_zero_labels = tf.boolean_mask(labels,mask)
+      logger.info('labels: %s',sess.run(indices))
+      
+
+
+
+
+
 
   
